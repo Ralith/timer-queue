@@ -11,7 +11,7 @@
 //! assert_eq!(q.poll(100), Some("second"));
 //! ```
 
-use std::{fmt, ops::RangeInclusive};
+use std::fmt;
 
 use slab::Slab;
 
@@ -152,41 +152,37 @@ impl<T> TimerQueue<T> {
 
     /// Find a timer expired by `now` in level 0
     fn scan_bottom(&mut self, now: u64) -> Option<T> {
-        if let Some((slot, timer)) = self.levels[0].slots[range_in_level(0, self.next_tick..=now)]
-            .iter_mut()
-            .find_map(|x| x.take().map(|timer| (x, timer)))
-        {
-            let state = self.timers.remove(timer.0);
-            debug_assert_eq!(state.prev, None, "head of list has no predecessor");
-            debug_assert!(state.expiry <= now);
-            if let Some(next) = state.next {
-                debug_assert_eq!(
-                    self.timers[next.0].prev,
-                    Some(timer),
-                    "successor links to head"
-                );
-                self.timers[next.0].prev = None;
-            }
-            *slot = state.next;
-            self.next_tick = state.expiry;
-            self.maybe_shrink();
-            return Some(state.value);
+        let index = self.levels[0].first_index()?;
+        if slot_start(self.next_tick, 0, index) > now {
+            return None;
         }
-        None
+        let timer = self.levels[0].slots[index];
+        let state = self.timers.remove(timer.0);
+        debug_assert_eq!(state.prev, None, "head of list has no predecessor");
+        debug_assert!(state.expiry <= now);
+        if let Some(next) = state.next {
+            debug_assert_eq!(
+                self.timers[next.0].prev,
+                Some(timer),
+                "successor links to head"
+            );
+            self.timers[next.0].prev = None;
+        }
+        self.levels[0].set(index, state.next);
+        self.next_tick = state.expiry;
+        self.maybe_shrink();
+        Some(state.value)
     }
 
     /// Advance to the start of the first nonempty slot or `now`, whichever is sooner
     fn advance_towards(&mut self, now: u64) {
         for level in 0..LEVELS {
-            for slot in range_in_level(level, self.next_tick..=now) {
-                debug_assert!(
-                    now >= slot_start(self.next_tick, level, slot),
-                    "slot overlaps with the past"
-                );
-                if self.levels[level].slots[slot].is_some() {
-                    self.advance_to(level, slot);
-                    return;
+            if let Some(slot) = self.levels[level].first_index() {
+                if slot_start(self.next_tick, level, slot) > now {
+                    break;
                 }
+                self.advance_to(level, slot);
+                return;
             }
         }
         self.next_tick = now;
@@ -195,13 +191,11 @@ impl<T> TimerQueue<T> {
     /// Advance to a specific slot, which must be the first nonempty slot
     fn advance_to(&mut self, level: usize, slot: usize) {
         debug_assert!(
-            self.levels[..level]
-                .iter()
-                .all(|level| level.slots.iter().all(|x| x.is_none())),
+            self.levels[..level].iter().all(|level| level.is_empty()),
             "lower levels are empty"
         );
         debug_assert!(
-            self.levels[level].slots[..slot].iter().all(Option::is_none),
+            self.levels[level].first_index().map_or(true, |x| x >= slot),
             "lower slots in this level are empty"
         );
 
@@ -214,9 +208,9 @@ impl<T> TimerQueue<T> {
         }
 
         // Unpack all timers in this slot into lower levels
-        while let Some(timer) = self.levels[level].slots[slot].take() {
+        while let Some(timer) = self.levels[level].take(slot) {
             let next = self.timers[timer.0].next;
-            self.levels[level].slots[slot] = next;
+            self.levels[level].set(slot, next);
             if let Some(next) = next {
                 self.timers[next.0].prev = None;
             }
@@ -237,12 +231,12 @@ impl<T> TimerQueue<T> {
         );
         let (level, slot) = timer_index(self.next_tick, self.timers[timer.0].expiry);
         // Insert `timer` at the head of the list in the target slot
-        let head = self.levels[level].slots[slot];
+        let head = self.levels[level].get(slot);
         self.timers[timer.0].next = head;
         if let Some(head) = head {
             self.timers[head.0].prev = Some(timer);
         }
-        self.levels[level].slots[slot] = Some(timer);
+        self.levels[level].set(slot, Some(timer));
     }
 
     /// Lower bound on when the next timer will expire, if any
@@ -250,7 +244,7 @@ impl<T> TimerQueue<T> {
         for level in 0..LEVELS {
             let start = ((self.next_tick >> (level * LOG_2_SLOTS)) & (SLOTS - 1) as u64) as usize;
             for slot in start..SLOTS {
-                if self.levels[level].slots[slot].is_some() {
+                if self.levels[level].get(slot).is_some() {
                     return Some(slot_start(self.next_tick, level, slot));
                 }
             }
@@ -299,7 +293,9 @@ impl<T> TimerQueue<T> {
 
     /// Iterate over the expiration and value of all scheduled timers
     pub fn iter_mut(&mut self) -> impl ExactSizeIterator<Item = (u64, &mut T)> {
-        self.timers.iter_mut().map(|(_, x)| (x.expiry, &mut x.value))
+        self.timers
+            .iter_mut()
+            .map(|(_, x)| (x.expiry, &mut x.value))
     }
 
     /// Borrow the value associated with `timer`
@@ -327,9 +323,9 @@ impl<T> TimerQueue<T> {
         let (level, slot) = timer_index(self.next_tick, self.timers[timer.0].expiry);
         // If necessary, remove a reference to `timer` from its slot by replacing it with its
         // successor
-        let slot_head = self.levels[level].slots[slot].unwrap();
+        let slot_head = self.levels[level].get(slot).unwrap();
         if slot_head == timer {
-            self.levels[level].slots[slot] = self.timers[slot_head.0].next;
+            self.levels[level].set(slot, self.timers[slot_head.0].next);
             debug_assert_eq!(
                 self.timers[timer.0].prev, None,
                 "head of list has no predecessor"
@@ -352,15 +348,6 @@ impl<T> TimerQueue<T> {
             self.timers[next.0].prev = prev;
         }
     }
-}
-
-fn range_in_level(level: usize, raw: RangeInclusive<u64>) -> RangeInclusive<usize> {
-    let shift = level * LOG_2_SLOTS;
-    const MASK: u64 = SLOTS as u64 - 1;
-    let start = ((*raw.start() >> shift) & MASK) as usize;
-    let level_end = (*raw.start() >> shift) | MASK;
-    let end = ((*raw.end() >> shift).min(level_end) & MASK) as usize;
-    start..=end
 }
 
 /// Compute the first tick that lies within a slot
@@ -412,14 +399,55 @@ struct TimerState<T> {
 /// `2^(LOG_2_SLOTS * n)`.
 #[derive(Copy, Clone)]
 struct Level {
-    slots: [Option<Timer>; SLOTS],
+    slots: [Timer; SLOTS],
+    /// Bit n indicates whether slot n is occupied, counting from LSB up
+    occupied: u64,
 }
 
 impl Level {
     const fn new() -> Self {
         Self {
-            slots: [None; SLOTS],
+            slots: [Timer(usize::MAX); SLOTS],
+            occupied: 0,
         }
+    }
+
+    fn first_index(&self) -> Option<usize> {
+        let x = self.occupied.trailing_zeros() as usize;
+        if x == self.slots.len() {
+            return None;
+        }
+        Some(x)
+    }
+
+    fn get(&self, slot: usize) -> Option<Timer> {
+        if self.occupied & (1 << slot) == 0 {
+            return None;
+        }
+        Some(self.slots[slot])
+    }
+
+    fn take(&mut self, slot: usize) -> Option<Timer> {
+        let x = self.get(slot)?;
+        self.set(slot, None);
+        Some(x)
+    }
+
+    fn set(&mut self, slot: usize, timer: Option<Timer>) {
+        match timer {
+            None => {
+                self.slots[slot] = Timer(usize::MAX);
+                self.occupied &= !(1 << slot);
+            }
+            Some(x) => {
+                self.slots[slot] = x;
+                self.occupied |= 1 << slot;
+            }
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.occupied == 0
     }
 }
 
@@ -430,7 +458,7 @@ impl fmt::Debug for Level {
             .slots
             .iter()
             .enumerate()
-            .filter_map(|(i, x)| x.map(|t| (i, t)));
+            .filter(|(i, _)| self.occupied & (1 << i) != 0);
         for (i, Timer(t)) in numbered_nonempty_slots {
             m.entry(&i, &t);
         }
@@ -460,15 +488,6 @@ mod tests {
         queue.insert(u64::MAX, ());
         assert!(queue.poll(u64::MAX - 1).is_none());
         assert!(queue.poll(u64::MAX).is_some());
-    }
-
-    #[test]
-    fn level_ranges() {
-        assert_eq!(range_in_level(0, 0..=1), 0..=1);
-        assert_eq!(range_in_level(0, 0..=SLOTS as u64), 0..=SLOTS - 1);
-        assert_eq!(range_in_level(1, 0..=SLOTS as u64), 0..=1);
-        assert_eq!(range_in_level(1, 0..=(SLOTS as u64).pow(2)), 0..=SLOTS - 1);
-        assert_eq!(range_in_level(2, 0..=(SLOTS as u64).pow(2)), 0..=1);
     }
 
     #[test]
@@ -546,11 +565,11 @@ mod tests {
 
         queue.reset(b, slot + 1);
 
-        assert_eq!(queue.levels[0].slots[slot as usize + 1], Some(b));
+        assert_eq!(queue.levels[0].get(slot as usize + 1), Some(b));
         assert_eq!(queue.timers[b.0].prev, None);
         assert_eq!(queue.timers[b.0].next, None);
 
-        assert_eq!(queue.levels[0].slots[slot as usize], Some(c));
+        assert_eq!(queue.levels[0].get(slot as usize), Some(c));
         assert_eq!(queue.timers[c.0].prev, None);
         assert_eq!(queue.timers[c.0].next, Some(a));
         assert_eq!(queue.timers[a.0].prev, Some(c));
