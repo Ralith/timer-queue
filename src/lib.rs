@@ -11,7 +11,9 @@
 //! assert_eq!(q.poll(100), Some("second"));
 //! ```
 
-use std::fmt;
+#![no_std]
+
+use core::fmt;
 
 use slab::Slab;
 
@@ -477,7 +479,9 @@ pub struct Timer(usize);
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    extern crate std;
+
+    use std::{vec::Vec, collections::HashMap};
 
     use super::*;
     use proptest::prelude::*;
