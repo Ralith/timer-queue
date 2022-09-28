@@ -1,0 +1,23 @@
+[package]
+name = "timer-queue"
+version = "0.0.0"
+edition = "2021"
+description = "Pure, minimal, and scalable timers"
+authors = ["Benjamin Saunders <ben.e.saunders@gmail.com>"]
+license = "MIT OR Apache-2.0 OR Zlib"
+repository = "https://github.com/Ralith/timer-queue"
+readme = "README.md"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+slab = "0.4"
+
+[dev-dependencies]
+proptest = "1"
+criterion = "0.4"
+rand = { version = "0.8.5", features = ["small_rng"] }
+
+[[bench]]
+name = "bench"
+harness = false
