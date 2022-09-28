@@ -292,9 +292,14 @@ impl<T> TimerQueue<T> {
         }
     }
 
-    /// Iterate over all scheduled timers
+    /// Iterate over the expiration and value of all scheduled timers
     pub fn iter(&self) -> impl ExactSizeIterator<Item = (u64, &T)> {
         self.timers.iter().map(|(_, x)| (x.expiry, &x.value))
+    }
+
+    /// Iterate over the expiration and value of all scheduled timers
+    pub fn iter_mut(&mut self) -> impl ExactSizeIterator<Item = (u64, &mut T)> {
+        self.timers.iter_mut().map(|(_, x)| (x.expiry, &mut x.value))
     }
 
     /// Borrow the value associated with `timer`
