@@ -11,7 +11,7 @@ readme = "README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-slab = "0.4"
+slab = "0.4.7"
 
 [dev-dependencies]
 proptest = "1"
