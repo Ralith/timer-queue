@@ -1,6 +1,6 @@
 [package]
 name = "timer-queue"
-version = "0.0.0"
+version = "0.1.0"
 edition = "2021"
 description = "Pure, minimal, and scalable timers"
 authors = ["Benjamin Saunders <ben.e.saunders@gmail.com>"]
