@@ -12,10 +12,17 @@
 //! ```
 
 #![no_std]
+extern crate alloc;
 
+use alloc::vec::Vec;
 use core::fmt;
 
 use slab::Slab;
+
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+#[cfg(feature = "serde")]
+use serde::ser::SerializeSeq;
 
 /// Stores values to be yielded at specific times in the future
 ///
@@ -481,7 +488,8 @@ pub struct Timer(usize);
 mod tests {
     extern crate std;
 
-    use std::{vec::Vec, collections::HashMap};
+   use alloc::format;
+   use std::{vec::Vec, collections::HashMap};
 
     use super::*;
     use proptest::prelude::*;
@@ -640,6 +648,38 @@ mod tests {
                 }
             }
         }
+
+
+      #[test]
+      #[cfg(feature = "serde")]
+        fn bois(ts in times()) {
+
+            let mut queue = TimerQueue::<usize>::new();
+            for (i, t) in ts.into_iter().enumerate() {
+                queue.insert(t, i);
+            }
+
+            let serialized: Vec<u8> = bincode::serialize(&queue).expect("Serialization failed");
+            let mut deserialized: TimerQueue<usize> = bincode::deserialize(&serialized).expect("Deserialization failed");
+
+
+          loop {
+            let toa = queue.next_timeout();
+            let tob = deserialized.next_timeout();
+             assert!(toa == tob);
+             if let (Some(ta), Some(tb)) = (toa, tob) {
+                let r1 = queue.poll(ta);
+                let r2 = deserialized.poll(tb);
+                assert!(r1 == r2);
+             }
+             else {
+                break;
+             }
+          }
+        }
+
+
+
     }
 
     /// Generates a time whose level/slot is more or less uniformly distributed
@@ -660,4 +700,73 @@ mod tests {
         [time(), time(), time(), time(), time(), time(), time(), time(),
          time(), time(), time(), time(), time(), time(), time(), time()]
     }
+
+
+
+
+
+
+
+}
+
+
+
+
+
+
+#[cfg(feature = "serde")]
+impl <T: serde::Serialize> serde::Serialize for TimerQueue<T>  {
+   fn serialize<S>(&self, serializer: S) -> Result<<S as serde::Serializer>::Ok, <S as serde::Serializer>::Error>
+   where
+      S: serde::Serializer
+   {
+      let mut seq = serializer.serialize_seq(Some(self.len()))?;
+      for v in self.iter() {
+         let t: (u64, &T) = v;
+         seq.serialize_element(&t)?;
+      }
+      let r = seq.end();
+      r
+   }
+}
+
+#[cfg(feature = "serde")]
+impl<'de, T> serde::Deserialize<'de> for TimerQueue<T>
+where
+   T: serde::Deserialize<'de>,
+{
+   fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+   where
+      D: serde::Deserializer<'de>,
+   {
+      use core::marker::PhantomData;
+      use core::fmt::{Formatter};
+
+      struct TimerQueueVisitor<T>(PhantomData<T>);
+
+      impl<'de, T> serde::de::Visitor<'de> for TimerQueueVisitor<T>
+      where
+         T: serde::Deserialize<'de>,
+      {
+         type Value = TimerQueue<T>;
+
+         fn expecting(&self, formatter: &mut Formatter) -> fmt::Result {
+            formatter.write_str("a sequence of (u64, T) tuples")
+         }
+
+         fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+         where
+            A: serde::de::SeqAccess<'de>,
+         {
+
+            let mut timer_queue = TimerQueue::<T>::new();
+            while let Some((time, value)) = seq.next_element::<(u64, T)>()? {
+               timer_queue.insert(time, value);
+            }
+            Ok(timer_queue)
+         }
+      }
+
+      deserializer.deserialize_seq(TimerQueueVisitor(PhantomData))
+   }
 }
