@@ -1,6 +1,6 @@
 [package]
 name = "timer-queue"
-version = "0.2.0"
+version = "0.1.1"
 edition = "2021"
 description = "Pure, minimal, and scalable timers"
 authors = ["Benjamin Saunders <ben.e.saunders@gmail.com>"]
@@ -10,7 +10,7 @@ readme = "README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
-serde = ["dep:serde", "slab/serde"]
+serde = ["dep:serde"]
 
 [dependencies]
 slab = { version = "0.4.7", default-features = false }
@@ -21,6 +21,7 @@ proptest = "1"
 criterion = "0.4"
 rand = { version = "0.8.5", features = ["small_rng"] }
 bincode = { version = "1.3.3" }
+serde_test = "1.0.177"
 
 [[bench]]
 name = "bench"

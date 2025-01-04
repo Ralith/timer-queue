@@ -496,8 +496,7 @@ impl<T: serde::Serialize> serde::Serialize for TimerQueue<T> {
             let t: (u64, &T) = v;
             seq.serialize_element(&t)?;
         }
-        let r = seq.end();
-        r
+        seq.end()
     }
 }
 
@@ -529,7 +528,11 @@ where
             where
                 A: serde::de::SeqAccess<'de>,
             {
-                let mut timer_queue = TimerQueue::<T>::new();
+                let mut timer_queue = if let Some(size) = seq.size_hint() {
+                    TimerQueue::<T>::with_capacity(size)
+                } else {
+                    TimerQueue::<T>::new()
+                };
                 while let Some((time, value)) = seq.next_element::<(u64, T)>()? {
                     timer_queue.insert(time, value);
                 }
@@ -543,8 +546,11 @@ where
 
 #[cfg(test)]
 mod tests {
+    extern crate alloc;
     extern crate std;
+    use alloc::vec;
 
+    use serde_test::{assert_ser_tokens, assert_tokens, Token};
     use std::{collections::HashMap, vec::Vec};
 
     use super::*;
@@ -705,33 +711,23 @@ mod tests {
             }
         }
 
-      #[test]
-      #[cfg(feature = "serde")]
-        fn serialization(ts in times()) {
 
+        #[test]
+        fn serialization(ts in times()) {
             let mut queue = TimerQueue::<usize>::new();
+            let mut tokens = vec![];
+            tokens.push(Token::Seq {len: Some(ts.len())});
             for (i, t) in ts.into_iter().enumerate() {
                 queue.insert(t, i);
+                tokens.push(Token::Tuple { len: 2 });
+                tokens.push(Token::U64(t));
+                tokens.push(Token::U64(i as u64));
+                tokens.push(Token::TupleEnd);
             }
-
-            let serialized: Vec<u8> = bincode::serialize(&queue).expect("Serialization failed");
-            let mut deserialized: TimerQueue<usize> = bincode::deserialize(&serialized).expect("Deserialization failed");
-
-
-          loop {
-            let toa = queue.next_timeout();
-            let tob = deserialized.next_timeout();
-             assert!(toa == tob);
-             if let (Some(ta), Some(tb)) = (toa, tob) {
-                let r1 = queue.poll(ta);
-                let r2 = deserialized.poll(tb);
-                assert!(r1 == r2);
-             }
-             else {
-                break;
-             }
-          }
+            tokens.push(Token::SeqEnd);
+             assert_ser_tokens(&queue, &tokens);
         }
+
     }
 
     /// Generates a time whose level/slot is more or less uniformly distributed
