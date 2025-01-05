@@ -550,7 +550,6 @@ mod tests {
     extern crate std;
     use alloc::vec;
 
-    use serde_test::{assert_ser_tokens, assert_tokens, Token};
     use std::{collections::HashMap, vec::Vec};
 
     use super::*;
@@ -710,24 +709,36 @@ mod tests {
                 }
             }
         }
+    }
 
-
-        #[test]
-        fn serialization(ts in times()) {
-            let mut queue = TimerQueue::<usize>::new();
-            let mut tokens = vec![];
-            tokens.push(Token::Seq {len: Some(ts.len())});
-            for (i, t) in ts.into_iter().enumerate() {
-                queue.insert(t, i);
-                tokens.push(Token::Tuple { len: 2 });
-                tokens.push(Token::U64(t));
-                tokens.push(Token::U64(i as u64));
-                tokens.push(Token::TupleEnd);
-            }
-            tokens.push(Token::SeqEnd);
-             assert_ser_tokens(&queue, &tokens);
+    #[test]
+    #[cfg(feature = "serde")]
+    fn serialization() {
+        let mut rnd = rand::thread_rng();
+        let values = (0..1024)
+            .map(|i| {
+                let time = rnd.gen_range(0..u64::MAX);
+                let value = rnd.gen_range(0..usize::MAX);
+                (time, value)
+            })
+            .collect::<Vec<(u64, usize)>>();
+        let mut queue = TimerQueue::<usize>::new();
+        for (t, v) in values {
+            queue.insert(t, v);
         }
+        let serialized: Vec<u8> = bincode::serialize(&queue).expect("Serialization failed");
+        let mut deserialized: TimerQueue<usize> =
+            bincode::deserialize(&serialized).expect("Deserialization failed");
 
+        loop {
+            let r1 = queue.poll(u64::MAX);
+            let r2 = deserialized.poll(u64::MAX);
+            assert!(r1 == r2);
+            let (Some(a), Some(b)) = (r1, r2) else {
+                break;
+            };
+            assert!(a == b);
+        }
     }
 
     /// Generates a time whose level/slot is more or less uniformly distributed
