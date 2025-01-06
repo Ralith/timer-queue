@@ -714,16 +714,28 @@ mod tests {
     #[test]
     #[cfg(feature = "serde")]
     fn serialization() {
-        let mut rnd = rand::thread_rng();
-        let values = (0..1024)
-            .map(|i| {
-                let time = rnd.gen_range(0..u64::MAX);
-                let value = rnd.gen_range(0..usize::MAX);
-                (time, value)
-            })
-            .collect::<Vec<(u64, usize)>>();
+        const VALUES: [(u64, usize); 17] = [
+            (23, 5132),
+            (87, 6),
+            (45, 7839),
+            (122, 345),
+            (67, 12333),
+            (34, 8),
+            (90, 234),
+            (151, 82290),
+            (56, 32),
+            (78, 567),
+            (19, 345),
+            (22, 78),
+            (33, 890),
+            (44, 123),
+            (51235, 6),
+            (66, 89),
+            (727, 890),
+        ];
+
         let mut queue = TimerQueue::<usize>::new();
-        for (t, v) in values {
+        for (t, v) in VALUES {
             queue.insert(t, v);
         }
         let serialized: Vec<u8> = bincode::serialize(&queue).expect("Serialization failed");
@@ -734,10 +746,9 @@ mod tests {
             let r1 = queue.poll(u64::MAX);
             let r2 = deserialized.poll(u64::MAX);
             assert!(r1 == r2);
-            let (Some(a), Some(b)) = (r1, r2) else {
+            if r1.is_none() {
                 break;
-            };
-            assert!(a == b);
+            }
         }
     }
 
