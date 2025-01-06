@@ -19,8 +19,6 @@ use slab::Slab;
 
 #[cfg(feature = "serde")]
 use serde::ser::SerializeSeq;
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 /// Stores values to be yielded at specific times in the future
 ///
@@ -548,7 +546,6 @@ where
 mod tests {
     extern crate alloc;
     extern crate std;
-    use alloc::vec;
 
     use std::{collections::HashMap, vec::Vec};
 
