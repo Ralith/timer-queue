@@ -519,7 +519,11 @@ where
             type Value = TimerQueue<T>;
 
             fn expecting(&self, formatter: &mut Formatter) -> fmt::Result {
-                formatter.write_str("a sequence of (u64, T) tuples")
+                write!(
+                    formatter,
+                    "a sequence of (u64, {}) tuples",
+                    core::any::type_name::<T>()
+                )
             }
 
             fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
